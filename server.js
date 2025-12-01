@@ -1,227 +1,114 @@
-// // backend/server.js
-// const express = require("express");
-// const cors = require("cors");
-// const http = require("http");
-// const { Server } = require("socket.io");
-
-// const app = express();
-// app.use(cors());
-// app.use(express.json());
-
-// const server = http.createServer(app);
-// const io = new Server(server, {
-//   cors: { origin: "*" }
-// });
-
-// // Memory storage
-// let users = [];        // { id, name, email }
-// let messages = [];     // { senderId, receiverId, message }
-// let onlineUsers = {};  // { userId: socketId }
-
-// // -------------------------
-// // Register
-// // -------------------------
-// app.post("/register", (req, res) => {
-//   const { name, email } = req.body;
-//   if (!name || !email) return res.status(400).json({ message: "Name and email required" });
-
-//   const existing = users.find(u => u.email === email);
-//   if (existing) return res.status(400).json({ message: "User exists" });
-
-//   const newUser = { id: Date.now().toString(), name, email };
-//   users.push(newUser);
-//   res.json({ message: "Registered", user: newUser });
-// });
-
-// // -------------------------
-// // Login
-// // -------------------------
-// app.post("/login", (req, res) => {
-//   const { email } = req.body;
-
-//   const user = users.find(u => u.email === email);
-//   if (!user) return res.status(404).json({ message: "User not found" });
-
-//   res.json({ message: "Login success", user });
-// });
-
-// // -------------------------
-// // Get all users
-// // -------------------------
-// app.get("/users", (req, res) => {
-//   res.json(users);
-// });
-
-// // -------------------------
-// // Get messages between two users
-// // -------------------------
-// app.get("/messages/:user1/:user2", (req, res) => {
-//   const { user1, user2 } = req.params;
-
-//   const chat = messages.filter(
-//     m =>
-//       (m.senderId === user1 && m.receiverId === user2) ||
-//       (m.senderId === user2 && m.receiverId === user1)
-//   );
-
-//   res.json(chat);
-// });
-
-// // -------------------------
-// // SOCKET.IO CHAT
-// // -------------------------
-// io.on("connection", (socket) => {
-//   console.log("User connected:", socket.id);
-
-//   // Join user online
-//   socket.on("join", (userId) => {
-//     onlineUsers[userId] = socket.id;
-//     console.log(`User ${userId} online`);
-//   });
-
-//   // Send message
-//   socket.on("send_message", ({ senderId, receiverId, message }) => {
-//     console.log(`Message from ${senderId} → ${receiverId}: ${message}`);
-
-//     // Save message
-//     messages.push({ senderId, receiverId, message });
-
-//     // Send to receiver if online
-//     const receiverSocket = onlineUsers[receiverId];
-//     if (receiverSocket) {
-//       io.to(receiverSocket).emit("receive_message", { senderId, message });
-//     }
-
-//     // Send copy back to sender UI
-//     socket.emit("receive_message", { senderId, message });
-//   });
-
-//   // Disconnect
-//   socket.on("disconnect", () => {
-//     for (let userId in onlineUsers) {
-//       if (onlineUsers[userId] === socket.id) {
-//         delete onlineUsers[userId];
-//         console.log(`User ${userId} disconnected`);
-//         break;
-//       }
-//     }
-//   });
-// });
-
-// server.listen(3001, () =>
-//   console.log("🔥 Server running at http://localhost:3001")
-// );
 // backend/server.js
 const express = require("express");
 const cors = require("cors");
 const http = require("http");
 const { Server } = require("socket.io");
+const mongoose = require("mongoose");
+
+// --- MongoDB Connection ---
+mongoose.connect("mongodb://127.0.0.1:27017/chatapp", {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+});
+
+const UserSchema = new mongoose.Schema({
+  name: String,
+  email: String,
+});
+
+const MessageSchema = new mongoose.Schema({
+  senderId: String,
+  receiverId: String,
+  message: String,
+  createdAt: { type: Date, default: Date.now },
+});
+
+const User = mongoose.model("User", UserSchema);
+const Message = mongoose.model("Message", MessageSchema);
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: "*" }
-});
+const io = new Server(server, { cors: { origin: "*" } });
 
-// In-memory storage
-let users = [];        // { id, name, email }
-let messages = [];     // { senderId, receiverId, message }
-let onlineUsers = {};  // { userId: socketId }
+let onlineUsers = {}; // { userId: socketId }
 
-// -----------------------------
+// -------------------- Routes --------------------
+
 // Register
-// -----------------------------
-app.post("/register", (req, res) => {
+app.post("/register", async (req, res) => {
   const { name, email } = req.body;
-  if (!name || !email) return res.status(400).json({ message: "Name and email required" });
+  if (!name || !email) return res.status(400).json({ message: "Name & email required" });
 
-  const existing = users.find(u => u.email === email);
-  if (existing) return res.status(400).json({ message: "User exists" });
+  let user = await User.findOne({ email });
+  if (user) return res.status(400).json({ message: "User exists" });
 
-  const newUser = { id: Date.now().toString(), name, email };
-  users.push(newUser);
-
-  res.json({ message: "Registered", user: newUser });
+  user = await User.create({ name, email });
+  res.json({ message: "Registered", user });
 });
 
-// -----------------------------
 // Login
-// -----------------------------
-app.post("/login", (req, res) => {
+app.post("/login", async (req, res) => {
   const { email } = req.body;
-
-  const user = users.find(u => u.email === email);
+  const user = await User.findOne({ email });
   if (!user) return res.status(404).json({ message: "User not found" });
 
   res.json({ message: "Login success", user });
 });
 
-// -----------------------------
 // Get all users
-// -----------------------------
-app.get("/users", (req, res) => {
+app.get("/users", async (req, res) => {
+  const users = await User.find();
   res.json(users);
 });
 
-// -----------------------------
 // Get messages between two users
-// -----------------------------
-app.get("/messages/:user1/:user2", (req, res) => {
+app.get("/messages/:user1/:user2", async (req, res) => {
   const { user1, user2 } = req.params;
-
-  const chat = messages.filter(
-    m =>
-      (m.senderId === user1 && m.receiverId === user2) ||
-      (m.senderId === user2 && m.receiverId === user1)
-  );
+  const chat = await Message.find({
+    $or: [
+      { senderId: user1, receiverId: user2 },
+      { senderId: user2, receiverId: user1 },
+    ],
+  }).sort({ createdAt: 1 });
 
   res.json(chat);
 });
 
-// -----------------------------
-// Socket.IO
-// -----------------------------
+// -------------------- Socket.io --------------------
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
-  // Track online users
   socket.on("join", (userId) => {
     onlineUsers[userId] = socket.id;
-    console.log(`User ${userId} online`);
+    io.emit("online_users", Object.keys(onlineUsers));
+    console.log("Online users:", Object.keys(onlineUsers));
   });
 
-  // Handle sending messages
-  socket.on("send_message", ({ senderId, receiverId, message }) => {
-    // Save message in memory
-    messages.push({ senderId, receiverId, message });
+  socket.on("send_message", async ({ senderId, receiverId, message }) => {
+    const msg = await Message.create({ senderId, receiverId, message });
 
-    // Send only to receiver if online
     const receiverSocket = onlineUsers[receiverId];
     if (receiverSocket) {
-      io.to(receiverSocket).emit("receive_message", { senderId, message });
+      io.to(receiverSocket).emit("receive_message", msg);
     }
 
-    // Do NOT emit to sender → frontend updates sender locally
+    // Send to sender too
+    socket.emit("receive_message", msg);
   });
 
-  // Disconnect
   socket.on("disconnect", () => {
     for (let userId in onlineUsers) {
       if (onlineUsers[userId] === socket.id) {
         delete onlineUsers[userId];
-        console.log(`User ${userId} disconnected`);
+        io.emit("online_users", Object.keys(onlineUsers));
         break;
       }
     }
   });
 });
 
-// -----------------------------
-// Start server
-// -----------------------------
-server.listen(3001, () => {
-  console.log("🔥 Server running at http://localhost:3001");
-});
+// -------------------- Start server --------------------
+server.listen(3001, () => console.log("Server running on http://localhost:3001"));
